@@ -1538,6 +1538,13 @@ function sendMacWallpaperMouseEvent(event) {
 const wallpaperMode = isWallpaperModeEnabled();
 const onWayland = Boolean(process.env.WAYLAND_DISPLAY);
 
+// Dev runs against the packaged app's data by default would fight it for the
+// single-instance lock; FOLIA_DEV_USER_DATA=1 gives this dev instance its own
+// userData directory so both can run side by side.
+if (isElectronDevRuntime() && process.env.FOLIA_DEV_USER_DATA === '1') {
+  app.setPath('userData', path.join(app.getPath('appData'), 'Folia-dev'));
+}
+
 // Serializes ownership, wrapper launch, and crash-loop accounting.
 async function prepareMainProcessStartup() {
   const gotSingleInstanceLock = await acquireSingleInstanceLock();
@@ -4111,6 +4118,13 @@ function isElectronDevRuntime() {
   return process.env.ELECTRON_DEV === 'true' || process.env.NODE_ENV === 'development';
 }
 
+// Dev-only CDP endpoint so external tooling (and mod debugging) can attach;
+// FOLIA_DEV_CDP_PORT=0 keeps it off even in dev.
+if (isElectronDevRuntime() && process.env.FOLIA_DEV_CDP_PORT !== '0') {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.FOLIA_DEV_CDP_PORT || '9222');
+  app.commandLine.appendSwitch('remote-allow-origins', process.env.FOLIA_DEV_CDP_ORIGINS || '*');
+}
+
 function loadAppEntry(win, query = {}) {
   if (isElectronDevRuntime()) {
     const url = new URL('http://localhost:3000');
@@ -5435,6 +5449,100 @@ app.on('before-quit', () => {
 // Settings Management IPC
 ipcMain.handle('window-set-native-theme', (event, themeSource) => {
   nativeTheme.themeSource = themeSource;
+});
+
+// LX 音源（自用 fork）：酷我目录接口的 CORS 代理。酷我的搜索/歌单是公开 HTTP
+// 接口，但响应不带 CORS 头，渲染进程直接 fetch 会被拦；这里在主进程转发。
+// 窄白名单：仅 http(s) 的酷我接口域名、仅 GET，文本响应，超时与体积有上限。
+const KUWO_PROXY_ALLOWED_HOSTS = new Set([
+  'search.kuwo.cn',
+  'wapi.kuwo.cn',
+  'nplserver.kuwo.cn',
+  'mobileinterfaces.kuwo.cn',
+  'qukudata.kuwo.cn',
+  'mlyric.kuwo.cn',
+  'artistpicserver.kuwo.cn',
+]);
+const KUWO_PROXY_MAX_BYTES = 2 * 1024 * 1024;
+
+ipcMain.handle('lx-kuwo-fetch', async (event, url) => {
+  let target;
+  try {
+    target = new URL(String(url));
+  } catch {
+    return { ok: false, error: 'invalid-url' };
+  }
+  if ((target.protocol !== 'http:' && target.protocol !== 'https:') || !KUWO_PROXY_ALLOWED_HOSTS.has(target.hostname)) {
+    return { ok: false, error: 'host-not-allowed' };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(target, { signal: controller.signal, redirect: 'follow' });
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > KUWO_PROXY_MAX_BYTES) return { ok: false, error: 'body-too-large' };
+    // latin1：每字节一字符，渲染端按相同语义还原字节（歌词响应是二进制混合文本）。
+    return { ok: true, status: response.status, body: buffer.toString('latin1') };
+  } catch (error) {
+    return { ok: false, error: controller.signal.aborted ? 'timeout' : String(error?.message ?? error) };
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+// LX 音源（自用 fork）：洛雪脚本请求代理。lx-music 桌面版里脚本请求本来就跑在
+// 主进程；这里同样让脚本的 http(s) 请求走主进程，绕开渲染进程 CORS。限制：文本
+// 体、GET/POST、超时 60s、响应上限 5MB，与 Folium net.fetch 的约束一致。
+const LX_SCRIPT_FETCH_MAX_BYTES = 5 * 1024 * 1024;
+
+ipcMain.handle('lx-script-fetch', async (event, url, init) => {
+  let target;
+  try {
+    target = new URL(String(url));
+  } catch {
+    return { ok: false, error: 'invalid-url' };
+  }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    return { ok: false, error: 'unsupported-protocol' };
+  }
+  const options = init && typeof init === 'object' ? init : {};
+  const method = String(options.method ?? 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'POST' && method !== 'PUT' && method !== 'DELETE' && method !== 'HEAD') {
+    return { ok: false, error: 'unsupported-method' };
+  }
+  const timeoutMs = Math.min(60000, Math.max(2000, Number(options.timeoutMs) || 15000));
+  const headers = {};
+  if (options.headers && typeof options.headers === 'object') {
+    Object.entries(options.headers).forEach(([key, value]) => {
+      if (typeof value === 'string') headers[key] = value;
+    });
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(target, {
+      method,
+      headers,
+      body: method === 'GET' || method === 'HEAD' || typeof options.body !== 'string' ? undefined : options.body,
+      signal: controller.signal,
+      redirect: 'follow',
+    });
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > LX_SCRIPT_FETCH_MAX_BYTES) return { ok: false, error: 'body-too-large' };
+    const responseHeaders = {};
+    response.headers.forEach((value, key) => { responseHeaders[key] = value; });
+    return {
+      ok: true,
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+      body: buffer.toString('utf8'),
+    };
+  } catch (error) {
+    return { ok: false, error: controller.signal.aborted ? 'timeout' : String(error?.message ?? error) };
+  } finally {
+    clearTimeout(timer);
+  }
 });
 
 // Cache the main window's device pixel ratio so export window sizing can be

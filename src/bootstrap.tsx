@@ -15,6 +15,7 @@ import { installFoliumCommandPaletteSync } from './mods/folium/commandPaletteSyn
 import { installFoliumHostEvents } from './mods/folium/hostEvents';
 import { installLibrarySuiteChromeCommands } from './library/app/installLibrarySuiteChromeCommands';
 import { installNativeDragGuard } from './utils/nativeDragGuard';
+import { installLxSource } from './services/lxSource/install';
 import { bootNavidromeServerPreset } from './services/navidromeServerPreset';
 import { isNavidromeEnabled } from './services/navidromeService';
 import { setNavidromeEnabledState } from './stores/useLibraryStore';
@@ -73,6 +74,10 @@ const renderApp = () => root.render(
 // registry, so the commands are put into its list here, before anything renders (main window only,
 // like the mod commands below). A clashing execute shortcut throws here, at startup.
 if (isMainApp) installLibrarySuiteChromeCommands();
+
+// 自用 fork 的内置 LX 音源（洛雪脚本适配）：注册 provider 与换链 hook，脚本装载
+// 异步进行，完成后通过 registry 广播点亮「连接在线平台」的 LX 徽章。
+if (isMainApp) installLxSource();
 
 const bootFolium = async () => {
     if (!isMainApp) return;

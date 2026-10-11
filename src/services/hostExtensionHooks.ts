@@ -93,6 +93,13 @@ export interface OmniResultHooks {
 }
 
 let omniHooks: OmniResultHooks | null = null;
+// 底层音频 hook：先于 mods 的 hook 执行（Folium 装的 hook 拿到的是我们处理过的结果）。
+// 内置 LX 音源换链走这一层；mods 未启用时它是唯一的 audio hook。
+let baseAudioHook: OmniResultHooks['audio'] | null = null;
+
+export const installBaseAudioHook = (hook: OmniResultHooks['audio'] | null) => {
+    baseAudioHook = hook;
+};
 
 export const installOmniResultHooks = (hooks: OmniResultHooks | null) => {
     omniHooks = hooks;
@@ -109,11 +116,19 @@ export const applyOmniLyricsHook = async (song: SongResult, result: ProviderLyri
 };
 
 export const applyOmniAudioHook = async (song: SongResult, source: ProviderAudioSource | null): Promise<ProviderAudioSource | null> => {
-    if (!omniHooks?.audio || omniHooks.isActive?.('audio') === false) return source;
+    let current = source;
+    if (baseAudioHook) {
+        try {
+            current = await baseAudioHook(song, current);
+        } catch (error) {
+            console.warn('[HostHooks] base audio hook failed; using the provider source', error);
+        }
+    }
+    if (!omniHooks?.audio || omniHooks.isActive?.('audio') === false) return current;
     try {
-        return await omniHooks.audio(song, source);
+        return await omniHooks.audio(song, current);
     } catch (error) {
         console.warn('[HostHooks] omni audio hook failed; using the provider source', error);
-        return source;
+        return current;
     }
 };

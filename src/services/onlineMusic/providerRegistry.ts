@@ -33,6 +33,15 @@ export const unregisterOnlineMusicProvider = (providerId: OnlineProviderId): voi
 /** Bumped by every registration and removal. */
 export const getOnlineMusicProviderRegistryVersion = (): number => registryVersion;
 
+/**
+ * Re-announces the current registry state without registering or removing anything:
+ * a provider whose `getAvailability` depends on async-loaded state (LX 音源的脚本装载)
+ * calls this when that state lands, so provider summaries re-read fresh availability.
+ */
+export const announceOnlineMusicProviderChange = (): void => {
+    announceRegistryChange();
+};
+
 /** Calls `listener` after every registration and removal; returns the unsubscribe function. */
 export const subscribeOnlineMusicProviderRegistry = (listener: () => void): (() => void) => {
     registryListeners.add(listener);

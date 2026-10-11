@@ -23,6 +23,7 @@ import type { PlayerCapConnectionStatus } from '../../types/playerCap';
 import LabSettingsModal from './settings/LabSettingsModal';
 import GraphicsSettingsSubview from './settings/GraphicsSettingsSubview';
 import ModsSettingsSubview from './settings/ModsSettingsSubview';
+import LxSourceSettingsSubview from './settings/LxSourceSettingsSubview';
 import DeveloperSettingsSubview from './settings/DeveloperSettingsSubview';
 import PlaybackSettingsSubview from './settings/PlaybackSettingsSubview';
 import InteractionSettingsSubview from './settings/InteractionSettingsSubview';
@@ -1914,6 +1915,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                         )}
                                         {activeSettingsSection === 'mods' && isElectron && (
                                             <ModsSettingsSubview isDaylight={isDaylight} theme={theme} />
+                                        )}
+                                        {activeSettingsSection === 'lxsource' && (
+                                            <LxSourceSettingsSubview isDaylight={isDaylight} settingsCardClass={settingsCardClass} />
                                         )}
                                         {activeSettingsSection === 'lab' && (
                                             <LabSettingsModal

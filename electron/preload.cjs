@@ -290,6 +290,10 @@ contextBridge.exposeInMainWorld('electron', {
         return () => ipcRenderer.removeListener('stage-player-queue-request', listener);
     },
     debugGetRenderedFonts: (selector) => ipcRenderer.invoke('debug-get-rendered-fonts', selector),
+    // LX 音源（自用 fork）：酷我目录接口走主进程 CORS 代理（窄域名白名单在 main.cjs）。
+    lxKuwoFetch: (url) => ipcRenderer.invoke('lx-kuwo-fetch', url),
+    // LX 音源：洛雪脚本的 http 请求走主进程（脚本请求本来就非渲染进程职责）。
+    lxScriptFetch: (url, init) => ipcRenderer.invoke('lx-script-fetch', url, init),
     mods: {
         listMods: () => ipcRenderer.invoke('folia-mods:list'),
         setModEnabled: (modId, enabled) => ipcRenderer.invoke('folia-mods:set-enabled', modId, enabled),

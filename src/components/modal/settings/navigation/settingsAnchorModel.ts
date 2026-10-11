@@ -72,6 +72,11 @@ export const SETTINGS_ANCHOR_DEFINITIONS = {
     modSystem: { section: 'mods', labelKey: 'options.enableModSystem', electronOnly: true },
     modList: { section: 'mods', labelKey: 'mods.title', electronOnly: true },
 
+    // LxSourceSettingsSubview（自用 fork：LX 音源）
+    lxSourceEnable: { section: 'lxsource', labelKey: 'options.lxSourceEnable' },
+    lxSourceScripts: { section: 'lxsource', labelKey: 'options.lxSourceScripts' },
+    lxSourcePlayback: { section: 'lxsource', labelKey: 'options.lxSourcePlayback' },
+
     // LabSettingsModal
     labPlayerUi: { section: 'lab', labelKey: 'options.labPlayerUiSection' },
     labWindowAndTools: { section: 'lab', labelKey: 'options.labWindowAndToolsSection' },
