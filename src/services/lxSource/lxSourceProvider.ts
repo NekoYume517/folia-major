@@ -11,7 +11,7 @@ import {
     PROVIDER_TO_LX_SOURCE,
     FOLIA_TO_LX_QUALITY,
 } from './lxRuntime.mjs';
-import { useLxSourceStore } from './lxSourceStore';
+import { useLxSourceStore, bumpLxCoverVersion } from './lxSourceStore';
 import {
     searchKuwoSongs,
     getKuwoPlaylists,
@@ -170,8 +170,8 @@ export const clearLxSourceUrlCache = () => {
 // ─── 酷我歌曲 → UnifiedSong 归一化 ─────────────────────────────────────
 
 // 封面按 songmid 缓存（酷我封面接口按歌曲 id 返回稳定 URL）。搜索页渲染时
-// 同步拿不到封面，先返回 undefined，由后台补齐后写回缓存——下一次渲染
-// （或 getSongDetail）就能读到。失败按 null 记住，避免反复打接口。
+// 同步拿不到封面，先返回 undefined，由后台补齐后写回缓存——bump 版本号让
+// 订阅了它的搜索行重渲染。失败按 null 记住，避免反复打接口。
 const coverCache = new Map<string, string | null>();
 
 const coverOf = (songmid: string): string | undefined => {
@@ -180,7 +180,10 @@ const coverOf = (songmid: string): string | undefined => {
     void getKuwoCoverUrl(songmid)
         .then(url => {
             coverCache.set(songmid, url);
-            if (url) announceOnlineMusicProviderChange();
+            if (url) {
+                announceOnlineMusicProviderChange();
+                bumpLxCoverVersion();
+            }
         })
         .catch(() => coverCache.set(songmid, null));
     return undefined;
@@ -233,7 +236,14 @@ export const lxSourceProvider: OnlineMusicProvider = {
     }),
     normalizeSong: (raw) => raw as UnifiedSong,
     songMetadata: {
-        getSongMetadata: song => createProviderSongMetadata(song),
+        // 封面走 coverOf 的缓存/异步补齐（酷我封面按 songmid 另有接口，搜索
+        // 响应本身不带图）：同步读缓存，未命中时后台补齐并广播刷新。
+        getSongMetadata: (song) => {
+            const base = createProviderSongMetadata(song);
+            const songmid = String(song.sourceRef?.kind === 'online' ? song.sourceRef.mediaId : song.id);
+            const coverUrl = coverOf(songmid);
+            return coverUrl ? { ...base, coverUrl, album: { ...base.album, coverUrl } } : base;
+        },
     },
     search: {
         async searchSongs(query, limit, offset) {

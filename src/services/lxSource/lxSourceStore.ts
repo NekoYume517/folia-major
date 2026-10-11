@@ -71,8 +71,7 @@ export const useLxSourceStore = create<LxSourceState>((set, get) => ({
     quality: readString(LX_SOURCE_QUALITY_KEY, '320k'),
     mode: (readString(LX_SOURCE_MODE_KEY, 'fallback') === 'always' ? 'always' : 'fallback'),
     scripts: readScripts(),
-    loadedSummaries: [],
-    setEnabled: (enabled) => {
+    loadedSummaries: [],    setEnabled: (enabled) => {
         if (typeof window !== 'undefined') window.localStorage.setItem(LX_SOURCE_ENABLED_KEY, String(enabled));
         set({ enabled });
     },
@@ -100,3 +99,14 @@ export const useLxSourceStore = create<LxSourceState>((set, get) => ({
     },
     setLoadedSummaries: (loadedSummaries) => set({ loadedSummaries }),
 }));
+
+/**
+ * 封面版本号：酷我封面按 songmid 异步补齐，拿到后 bump 一次；订阅它的
+ * 搜索结果行据此重渲染（否则首次搜索永远没有封面，第二次查询才命中缓存）。
+ */
+export const useLxCoverVersion = create<{ version: number; bump: () => void }>(set => ({
+    version: 0,
+    bump: () => set(state => ({ version: state.version + 1 })),
+}));
+
+export const bumpLxCoverVersion = () => useLxCoverVersion.getState().bump();

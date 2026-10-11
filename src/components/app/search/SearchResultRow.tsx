@@ -8,6 +8,7 @@ import { getSizedCoverUrl } from '../../../utils/coverUrl';
 import { getSongUnavailableLabel, isSongUnavailable } from '../../../services/onlineMusic/songAvailability';
 import { canResolveSongCatalogRef } from '../../../services/onlineMusic/catalogRefs';
 import { getProviderSongMetadata } from '../../../services/onlineMusic/songMetadata';
+import { useLxCoverVersion } from '../../../services/lxSource/lxSourceStore';
 
 // src/components/app/search/SearchResultRow.tsx
 
@@ -38,6 +39,9 @@ const SearchResultRow: React.FC<SearchResultRowProps> = ({
     onOpenAlbum,
 }) => {
     const { t } = useTranslation();
+    // LX 音源的封面按歌曲异步补齐：订阅版本号，拿到后本行重渲染（首次搜索
+    // 即可出图，不用再按一次回车）。其他平台封面同步可得，版本号不变无影响。
+    useLxCoverVersion(state => state.version);
     const isUnavailable = isSongUnavailable(track);
     const unavailableLabel = getSongUnavailableLabel(track, t('status.songUnavailableTag'));
     const metadata = getProviderSongMetadata(track);
