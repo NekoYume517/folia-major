@@ -1,0 +1,11 @@
+{
+  "folium": 1,
+  "id": "lx-music-source",
+  "name": "LX Music Source Adapter",
+  "version": "0.1.0",
+  "author": "zzy13335040016",
+  "description": "LX Music（洛雪音乐）自定义音源脚本适配层：导入 lx-music 音源脚本，为网易云/酷狗/QQ 在线歌曲解析播放直链（omni.hooks）。仅桌面端（模块系统为 Electron 功能）。",
+  "client": "client.mjs",
+  "permissions": ["net.fetch", "filesystem.data"],
+  "experimental": ["omni.hooks"]
+}
