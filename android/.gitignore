@@ -1,0 +1,11 @@
+# Gradle 构建产物
+.gradle/
+build/
+app/build/
+local.properties
+# IDE
+.idea/
+*.iml
+
+# cap sync 生成的 Web 资源（从 dist 拷贝），本地用 `npx cap sync android` 重建
+app/src/main/assets/public/

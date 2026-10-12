@@ -92,3 +92,7 @@ __pycache__/
 # Built by build/buildPythonRuntime.mjs - binary artifacts that live on the mirrors, not in git.
 dist-runtime/
 dev/lx-source-extract/
+
+# Android 构建产物与 cap sync 输出（见 README 的 Android 构建步骤）
+android/app/build/
+android/.gradle/

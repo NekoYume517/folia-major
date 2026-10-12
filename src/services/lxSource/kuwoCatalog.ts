@@ -38,9 +38,14 @@ const latin1ToUtf8 = (text: string): string => {
     return new TextDecoder('utf-8').decode(bytes);
 };
 
-/** lx httpFetch 的最小复刻：JSON 优先。渲染进程没有跨域豁免，走主进程代理
- * （electron/preload.cjs 的 lxKuwoFetch，main.cjs 里窄域名白名单）；Node/纯 Web
- * 环境退回直接 fetch（Node 无 CORS，Web 环境该 provider 本就不可用）。 */
+/** lx httpFetch 的最小复刻：JSON 优先。
+ *
+ * 三种运行环境的跨域策略：
+ * - Electron：走主进程代理（electron/preload.cjs 的 lxKuwoFetch，窄域名白名单）；
+ * - Android（Capacitor）：CapacitorHttp 插件已把 window.fetch 接到原生 HTTP，
+ *   渲染进程不受 CORS 限制，这里直接 fetch 即可；
+ * - 纯浏览器：直接 fetch，酷我不发 CORS 头时失败——该环境本就以远程 API 为主。
+ */
 const httpFetchJson = async (url: string, timeoutMs = 15000): Promise<{ statusCode: number; body: any }> => {
     const viaBridge = typeof window !== 'undefined' && (window as any).electron?.lxKuwoFetch;
     if (viaBridge) {

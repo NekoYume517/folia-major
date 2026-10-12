@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 自用 fork：与 index.html 的 theme-color (#09090b) 一致的暗色窗口底，
+         横屏/切口区域不会露出白色垫底（原 splash.png 是竖屏比例，宽屏时留白边）。 -->
+    <color name="colorPrimary">#09090b</color>
+    <color name="colorPrimaryDark">#09090b</color>
+    <color name="colorAccent">#f4f4f5</color>
+    <color name="foliaWindowBackground">#09090b</color>
+</resources>
