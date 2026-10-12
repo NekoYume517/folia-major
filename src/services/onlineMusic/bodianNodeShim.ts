@@ -1,11 +1,14 @@
 // src/services/onlineMusic/bodianNodeShim.ts
 // Android 上的「Node 运行时替身」：bodian-music-api 是纯 CJS 包，只用三样 Node 能力
 // —— node:https（发请求）、node:crypto（md5 签名）、node:zlib（gunzip 响应）。
-// 桌面版由 Electron 主进程提供真 Node；Android 壳里没有，这里用原生桥（OkHttp，
+// 桌面版由 Electron 主进程提供真 Node；Android 壳里没有，这里用原生桥（原始 Socket，
 // 见 android 的 NativeHttpBridge.java）加 Web 平台已有的等价物补齐：
 //
-// - 请求：window.__FOLIA_NATIVE_HTTP__.send(...)，支持 GET 带 body（波点协议必需，
-//   CapacitorHttp 做不到），返回 base64 原始字节；
+// - 请求：window.__FOLIA_NATIVE_HTTP__.sendAsync(...)，支持 GET 带 body（波点协议必需，
+//   CapacitorHttp 做不到），返回 base64 原始字节。**必须走异步桥**：@JavascriptInterface
+//   的同步方法会把 WebView 的 JS 线程挂起等网络往返（超时上限 45 秒），页面渲染、
+//   动画、触摸在这期间全部冻结 —— 所以 Java 侧线程池执行、evaluateJavascript 回调，
+//   JS 侧用 Promise 接（见 installNativeHttpDispatcher）；
 // - md5：Web Crypto 的 crypto.subtle.digest('MD5') 在 Chromium 里不可用，故用
 //   本地实现（与 lxRuntime 里那份同源的紧凑版本）；
 // - gunzip：DecompressionStream('gzip')。
@@ -13,6 +16,7 @@
 // 返回值形状对齐 bodian 的 requestJson 期望：{ status, headers, body 文本 }。
 
 const NATIVE_BRIDGE_KEY = '__FOLIA_NATIVE_HTTP__';
+const DELIVER_KEY = '__FOLIA_NATIVE_HTTP_DELIVER__';
 
 interface NativeHttpResult {
     status?: number;
@@ -23,7 +27,33 @@ interface NativeHttpResult {
 
 interface NativeHttpBridge {
     send(url: string, method: string, headersJson: string, payloadBase64: string): string;
+    sendAsync?(url: string, method: string, headersJson: string, payloadBase64: string, callbackId: string): void;
 }
+
+/** 回调 id → resolve。Java 侧完成请求后经 evaluateJavascript 送回结果。 */
+const pendingNativeRequests = new Map<string, (result: NativeHttpResult) => void>();
+
+/**
+ * 装上原生桥的结果投递器（幂等）。NativeHttpBridge.evaluateJavascript 调用的就是它：
+ *   window.__FOLIA_NATIVE_HTTP_DELIVER__(callbackId, resultJson)
+ */
+export const installNativeHttpDispatcher = (): void => {
+    if (typeof window === 'undefined') return;
+    const scope = window as unknown as Record<string, unknown>;
+    if (typeof scope[DELIVER_KEY] === 'function') return;
+    scope[DELIVER_KEY] = (callbackId: string, result: NativeHttpResult) => {
+        const resolve = pendingNativeRequests.get(callbackId);
+        if (!resolve) return;
+        pendingNativeRequests.delete(callbackId);
+        resolve(result ?? { error: 'native http bridge returned no result' });
+    };
+};
+
+let nativeRequestId = 0;
+const nextNativeRequestId = (): string => {
+    nativeRequestId = (nativeRequestId + 1) % 0xffffffff;
+    return `r${Date.now().toString(36)}_${nativeRequestId.toString(36)}`;
+};
 
 const getBridge = (): NativeHttpBridge | null => {
     if (typeof window === 'undefined') return null;
@@ -34,6 +64,39 @@ const getBridge = (): NativeHttpBridge | null => {
 };
 
 export const isNativeBodianHttpAvailable = (): boolean => getBridge() !== null;
+
+/** 发起原生请求：优先异步桥（不阻塞 JS 线程），旧同步桥兜底。 */
+const performNativeRequest = (bridge: NativeHttpBridge, url: string, method: string,
+                              headersJson: string, payloadBase64: string): Promise<NativeHttpResult> => {
+    installNativeHttpDispatcher();
+    if (typeof bridge.sendAsync === 'function') {
+        return new Promise(resolve => {
+            const callbackId = nextNativeRequestId();
+            // Java 侧崩溃/WebView 销毁时回调不会来：50 秒（> Java 的 15+30s 超时）兜底放行。
+            const fallback = window.setTimeout(() => {
+                pendingNativeRequests.delete(callbackId);
+                resolve({ error: 'native http bridge timed out' });
+            }, 50000);
+            pendingNativeRequests.set(callbackId, result => {
+                window.clearTimeout(fallback);
+                resolve(result);
+            });
+            try {
+                bridge.sendAsync!(url, method, headersJson, payloadBase64, callbackId);
+            } catch (error) {
+                window.clearTimeout(fallback);
+                pendingNativeRequests.delete(callbackId);
+                resolve({ error: String((error as Error)?.message ?? error) });
+            }
+        });
+    }
+    // 同步兜底（理论上不再走到）：调用本身仍会挂起 JS 线程。
+    try {
+        return Promise.resolve(JSON.parse(bridge.send(url, method, headersJson, payloadBase64)) as NativeHttpResult);
+    } catch (error) {
+        return Promise.resolve({ error: String((error as Error)?.message ?? error) });
+    }
+};
 
 const bytesToBase64 = (bytes: Uint8Array): string => {
     let binary = '';
@@ -103,8 +166,8 @@ export const createNativeHttpsRequest = () => (
         void (async () => {
             try {
                 const payload = body ? bytesToBase64(new TextEncoder().encode(body)) : '';
-                const raw = bridge.send(options.url, options.method ?? 'GET', JSON.stringify(headers), payload);
-                const parsed = JSON.parse(raw) as NativeHttpResult;
+                const parsed = await performNativeRequest(
+                    bridge, options.url, options.method ?? 'GET', JSON.stringify(headers), payload);
                 if (aborted) return;
                 if (parsed.error) {
                     request.emit('error', new Error(parsed.error));

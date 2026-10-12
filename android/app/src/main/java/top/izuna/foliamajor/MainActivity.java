@@ -41,7 +41,8 @@ public class MainActivity extends BridgeActivity {
         // CORS 头注入：替换掉 Capacitor 的默认 WebViewClient，未命中的请求仍交回原实现。
         webView.setWebViewClient(new CorsMediaWebViewClient(getBridge()));
         // 波点协议要求的「GET 带 JSON body」由这个桥承担。
-        webView.addJavascriptInterface(new NativeHttpBridge(), "__FOLIA_NATIVE_HTTP__");
+        // 桥需要 WebView 引用做异步回调（evaluateJavascript），必须主线程构造。
+        webView.addJavascriptInterface(new NativeHttpBridge(webView), "__FOLIA_NATIVE_HTTP__");
     }
 
     private void enterImmersiveMode() {

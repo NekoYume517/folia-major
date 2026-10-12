@@ -2,6 +2,7 @@ package top.izuna.foliamajor;
 
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
 
 import org.json.JSONObject;
 
@@ -15,6 +16,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
@@ -32,14 +36,74 @@ import javax.net.ssl.SSLSocketFactory;
 //   GET <path> HTTP/1.1 / Host / 应用头 / Content-Length / Connection: keep-alive / 空行 / body
 // TLS 由 SSLSocketFactory 承担（与 https:// 等价）。
 //
+// 同步/异步：@JavascriptInterface 的同步方法会把 WebView 的 JS 线程挂起等 Java
+// 返回，网络往返期间页面渲染/动画/触摸全部冻结 —— 所以 JS 侧一律走 sendAsync：
+// 立即返回，线程池里发请求，完成后 evaluateJavascript 回调
+// window.__FOLIA_NATIVE_HTTP_DELIVER__(callbackId, resultJson)。
+// send() 保留为同步兜底（旧调试路径），应用代码不应再用它。
+//
 // 返回 base64 的响应体（gzip 在这里就地解开，避免 JS 侧再处理二进制）。
 public class NativeHttpBridge {
 
     private static final int CONNECT_TIMEOUT_MS = 15000;
     private static final int READ_TIMEOUT_MS = 30000;
+    /** 所有请求共用一个线程池；cached 池空闲 60 秒自动回收线程。 */
+    private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool(runnable -> {
+        Thread thread = new Thread(runnable, "FoliaNativeHttp");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    private final java.lang.ref.WeakReference<WebView> webViewRef;
+
+    public NativeHttpBridge(WebView webView) {
+        this.webViewRef = webView == null ? null : new java.lang.ref.WeakReference<>(webView);
+    }
+
+    /** JS 侧生成的回调 id 只允许安全字符，直接内嵌进 evaluateJavascript 的脚本。 */
+    private static boolean isSafeCallbackId(String callbackId) {
+        return callbackId != null && callbackId.matches("[A-Za-z0-9_-]{1,64}");
+    }
 
     @JavascriptInterface
+    public void sendAsync(final String url, final String method, final String headersJson,
+                          final String payloadBase64, final String callbackId) {
+        if (!isSafeCallbackId(callbackId)) return;
+        EXECUTOR.execute(new Runnable() {
+            @Override
+            public void run() {
+                deliverToJs(callbackId, performRequest(url, method, headersJson, payloadBase64));
+            }
+        });
+    }
+
+    /** 同步兜底：JS 线程会被挂起直到请求结束。仅供调试，应用代码走 sendAsync。 */
+    @JavascriptInterface
     public String send(String url, String method, String headersJson, String payloadBase64) {
+        return performRequest(url, method, headersJson, payloadBase64);
+    }
+
+    /** 结果送回 JS。必须在 UI 线程上 evaluateJavascript，WebView 销毁后静默放弃。 */
+    private void deliverToJs(final String callbackId, final String resultJson) {
+        final WebView webView = webViewRef == null ? null : webViewRef.get();
+        if (webView == null) return;
+        final String payload = resultJson == null ? "null" : resultJson;
+        webView.post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    webView.evaluateJavascript(
+                        "(window.__FOLIA_NATIVE_HTTP_DELIVER__||null)&&window.__FOLIA_NATIVE_HTTP_DELIVER__("
+                            + JSONObject.quote(callbackId) + "," + payload + ");",
+                        null);
+                } catch (Exception ignored) {
+                    // WebView 已销毁（页面关闭/重建）：无处投递，放弃即可。
+                }
+            }
+        });
+    }
+
+    private static String performRequest(String url, String method, String headersJson, String payloadBase64) {
         JSONObject result = new JSONObject();
         try {
             URI uri = new URI(url);

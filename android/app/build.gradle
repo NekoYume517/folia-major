@@ -7,8 +7,8 @@ android {
         applicationId "top.izuna.foliamajor"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 717
-        versionName "0.7.17-lx1"
+        versionCode 718
+        versionName "0.7.17-lx2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
