@@ -79,6 +79,16 @@ if (isMainApp) installLibrarySuiteChromeCommands();
 // 异步进行，完成后通过 registry 广播点亮「连接在线平台」的 LX 徽章。
 if (isMainApp) installLxSource();
 
+// Android 壳：给波点注入 window.electron.bodianRequest 替身（原生 HTTP 桥 + Node
+// shim，见 services/onlineMusic/bodianAndroidBridge.ts）。桌面版已有真桥，这里是
+// no-op；必须在 provider 摘要第一次被读之前完成，否则波点会被判成 runtime-unavailable
+// 而在「连接在线平台」里隐藏。
+const bootBodianBridge = async () => {
+    if (!isMainApp) return;
+    const { installBodianAndroidBridge } = await import('./services/onlineMusic/bodianAndroidBridge');
+    await installBodianAndroidBridge();
+};
+
 const bootFolium = async () => {
     if (!isMainApp) return;
     installFoliumCommandPaletteSync();
@@ -97,10 +107,12 @@ const bootNavidrome = async () => {
 };
 
 // allSettled：mod 加载失败也要等预置写完再渲染，失败原因单独打出来，不吞掉。
-void Promise.allSettled([bootFolium(), bootNavidrome()])
-    .then(([folium, navidrome]) => {
+// 波点桥（Android）也要在首次渲染前装好：provider 摘要在首屏就会读 availability。
+void Promise.allSettled([bootFolium(), bootNavidrome(), bootBodianBridge()])
+    .then(([folium, navidrome, bodian]) => {
         if (folium.status === 'rejected') console.error('[Bootstrap] Folium boot failed:', folium.reason);
         if (navidrome.status === 'rejected') console.warn('[Navidrome] Server preset boot failed:', navidrome.reason);
+        if (bodian.status === 'rejected') console.warn('[Bootstrap] Bodian bridge boot failed:', bodian.reason);
     })
     .finally(() => {
         void initializeLocalCoverRuntime().finally(renderApp);

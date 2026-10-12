@@ -287,6 +287,13 @@ export default async function viteConfig(_config: ConfigEnv): Promise<UserConfig
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
+        // 自用 fork：`bodian-music-api` 是 CJS 包，顶层 require 三样 Node 能力。
+        // Android 壳里没有真 Node，由原生 HTTP 桥 + Web 平台能力替身顶上
+        // （src/services/onlineMusic/bodianNodeModules.ts）。该包只在原生桥存在时
+        // 被动态 import，所以桌面/网页版不会真的解析到这些替身。
+        'node:https': path.resolve(__dirname, './src/services/onlineMusic/bodianNodeModules.ts'),
+        'node:crypto': path.resolve(__dirname, './src/services/onlineMusic/bodianNodeModules.ts'),
+        'node:zlib': path.resolve(__dirname, './src/services/onlineMusic/bodianNodeModules.ts'),
       }
     }
   };

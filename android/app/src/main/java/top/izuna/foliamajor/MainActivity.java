@@ -3,6 +3,7 @@ package top.izuna.foliamajor;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.WindowManager;
+import android.webkit.WebView;
 
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -10,16 +11,19 @@ import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.BridgeActivity;
 
-// 自用 fork 的 Android 壳：沉浸式全屏。Folia 界面自带顶栏与底部控制区，
-// 系统状态栏/导航栏叠上去只会遮内容，所以两条都隐藏。
-// systemBarsBehavior 用 BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE：从边缘划一下
-// 系统栏临时出现（能看时间/退到桌面），不划就自动收起。
+// 自用 fork 的 Android 壳：
+// - 沉浸式全屏（状态栏/导航栏隐藏，边缘划动临时唤出）；
+// - 挂 CORS 媒体代理 WebViewClient（酷狗/QQ/波点/酷我/LX 的音频与封面注入 ACAO 头，
+//   对齐桌面版 electron/main.cjs 的 onHeadersReceived）；
+// - 暴露原生 HTTP 桥 __FOLIA_NATIVE_HTTP__（OkHttp，支持 GET 带 body），
+//   供波点的 Node shim 使用。
 public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         enterImmersiveMode();
+        installRenderEnhancements();
     }
 
     @Override
@@ -29,6 +33,15 @@ public class MainActivity extends BridgeActivity {
         if (hasFocus) {
             enterImmersiveMode();
         }
+    }
+
+    private void installRenderEnhancements() {
+        WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+        if (webView == null) return;
+        // CORS 头注入：替换掉 Capacitor 的默认 WebViewClient，未命中的请求仍交回原实现。
+        webView.setWebViewClient(new CorsMediaWebViewClient(getBridge()));
+        // 波点协议要求的「GET 带 JSON body」由这个桥承担。
+        webView.addJavascriptInterface(new NativeHttpBridge(), "__FOLIA_NATIVE_HTTP__");
     }
 
     private void enterImmersiveMode() {
