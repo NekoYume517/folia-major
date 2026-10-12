@@ -11,10 +11,13 @@ import { PROVIDER_TO_LX_SOURCE } from './lxRuntime.mjs';
 // `always` 无条件优先 LX（LX 也失败时保留原直链）。
 //
 // hook 是被 await 的（hostExtensionHooks.applyOmniAudioHook），但上层播放链路对
-// 冷启动很慢的音源 API 没有额外耐心 —— 这里整体限时 6 秒，超时回退原直链；
-// 平时命中的是 10 分钟直链缓存，几乎零开销。
+// 冷启动很慢的音源 API 没有额外耐心 —— 这里限时 20 秒，超时就放弃这次换链
+// （注意：超时后不抛错，播放仍按原直链走；但若原本就没有原直链，调用方会按
+// 「取链失败」提示重试，而不是误报成歌曲下架）。
+// 平时命中的是 10 分钟直链缓存，几乎零开销。20 秒是给冷启动的音源站留的余量：
+// onrender 这类免费实例首次请求要 5~30 秒，6 秒（早期取值）在移网下几乎必然超时。
 
-const SWAP_TIMEOUT_MS = 6000;
+const SWAP_TIMEOUT_MS = 20000;
 
 const withTimeout = async <T>(promise: Promise<T>, ms: number): Promise<T | null> => {
     let timer: ReturnType<typeof setTimeout> | null = null;

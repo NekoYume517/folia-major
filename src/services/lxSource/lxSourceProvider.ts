@@ -1,4 +1,5 @@
 import type { OnlineMusicProvider, ProviderAudioSource, ProviderCapabilities, ProviderCollection, ProviderPage } from '../../types/onlineMusic';
+import { OnlineProviderError } from '../../types/onlineMusic';
 import type { SongResult, UnifiedSong } from '../../types';
 import { getPlaybackSourceRef } from '../../utils/appPlaybackGuards';
 import { createProviderSongMetadata } from '../../utils/songMetadata';
@@ -54,20 +55,26 @@ export const reloadLxSourceRuntimes = async (): Promise<{ id: string; name: stri
                 netFetch: (url: string, options: import('./lxRuntime').LxNetFetchOptions) => {
                     const bridge = typeof window !== 'undefined' && (window as any).electron?.lxScriptFetch;
                     if (!bridge) {
-                        // Node 探针 / 非 Electron 环境：直接 fetch。
+                        // Node 探针 / Android（CapacitorHttp 已接管 fetch）等无 Electron 桥的环境：
+                        // 直接 fetch，但必须先把 body 读成字符串再交出去——
+                        // lxRuntime 是按「同步 text()」消费响应的（Electron 桥返回的是字符串），
+                        // 这里若返回 Promise，脚本会 JSON.parse 到 Promise 并报 "unknow error"。
                         return fetch(url, {
                             method: options.method,
                             headers: options.headers,
                             body: options.body,
                             signal: AbortSignal.timeout(options.timeoutMs ?? 15000),
-                        }).then(async (response) => ({
-                            ok: response.ok,
-                            status: response.status,
-                            statusText: response.statusText,
-                            headers: Object.fromEntries(response.headers.entries()),
-                            // FoliumFetchResponse 契约：text()/json() 同步返回。
-                            text: () => response.text(),
-                        }));
+                        }).then(async (response) => {
+                            const text = await response.text();
+                            return {
+                                ok: response.ok,
+                                status: response.status,
+                                statusText: response.statusText,
+                                headers: Object.fromEntries(response.headers.entries()),
+                                // FoliumFetchResponse 契约：text()/json() 同步返回。
+                                text: () => text,
+                            };
+                        });
                     }
                     return bridge(url, options).then((result: any) => {
                         if (!result?.ok) throw new Error(result?.error ?? 'script fetch failed');
@@ -312,7 +319,16 @@ export const lxSourceProvider: OnlineMusicProvider = {
             const mapped = sourceIdOfSong(song);
             if (!mapped) return null;
             const url = await resolveLxSourceUrl(mapped.lxSource, mapped.id);
-            if (!url) return null;
+            if (!url) {
+                // 脚本这次没给链接（源站抖动、脚本刚装载没预热、接口被限流等），
+                // 明确报成网络类失败：调用方据此提示「播放出错并可重试」，
+                // 而不是静默返回 null 让它显示成「歌曲已下架」。
+                throw new OnlineProviderError(
+                    'network',
+                    `LX source returned no URL for ${mapped.lxSource}:${mapped.id}`,
+                    LX_SOURCE_PROVIDER_ID,
+                );
+            }
             return {
                 url,
                 fetchedAt: Date.now(),

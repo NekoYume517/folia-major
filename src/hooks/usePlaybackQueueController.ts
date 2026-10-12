@@ -579,6 +579,18 @@ export function usePlaybackQueueController({
                             ? 'status.songRegionRestricted' : 'status.loginExpired') });
                     return;
                 }
+                // 取链失败（网络 / 请求被拒 / 响应异常）不等于「这首歌下架」：只是这次没问
+                // 到链接（源站抖动、音源脚本刚装载完还没预热等），重试通常就好。按播放
+                // 出错提示并停在当前曲目，不走下面的下架跳过流程。
+                if (preloadedOnlineAudioResult.reason === 'network'
+                    || preloadedOnlineAudioResult.reason === 'invalid-response') {
+                    shouldAutoPlayRef.current = false;
+                    audioRef.current?.pause();
+                    setPlayerState(PlayerState.IDLE);
+                    setIsLyricsLoading(false);
+                    setStatusMsg({ type: 'error', text: t('status.playbackError') });
+                    return;
+                }
                 const nextSong = getNextPlayableQueueSong(queueContext, song);
                 const canSkip = Boolean(nextSong) && skipCount < MAX_UNAVAILABLE_AUTO_SKIP_COUNT;
 
